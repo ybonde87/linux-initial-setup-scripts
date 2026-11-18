@@ -19,6 +19,8 @@ Built for **WSL2 + zsh + Powerlevel10k** setups.
 | 🔍 Auto-discovery | `proj-scan <folder>` | Walk a folder tree, find every `.git` repo, auto-register it |
 | 🩺 Health check | `proj-doctor` | Audit all mappings — flags missing folders or non-git folders |
 | ➕ Add a project | `proj-add <keys> <path>` | Register a new mapping manually |
+| 📥 Clone into current folder | `proj-clone <url> [keys]` | Clone a repository under the current folder and register it |
+| 📂 Clone into a specific folder | `proj-clone-into <folder> <url> [keys]` | Clone a repository under a chosen folder and register it |
 | ➖ Remove a project | `proj-remove <keys>` | Delete a mapping (auto-backs up config first) |
 | ✏️ Edit config | `proj-edit` | Open the raw config file for manual bulk edits (auto-backs up first) |
 | ♻️ Restore config | `proj-restore` | Restore the config from its last automatic backup |
@@ -99,6 +101,32 @@ corp apac ise|/home/you/projects/work/Corp/APAC/ISE-repo
 ```
 
 A backup is automatically taken before the editor opens.
+
+### Option D — Clone and register
+
+Clone a repository into the current directory:
+
+```bash
+cd ~/projects/work/Acme/EMEA
+proj-clone git@gitlab.com:acme/emea/tgw-repo.git
+```
+
+This creates `~/projects/work/Acme/EMEA/tgw-repo` and automatically registers `acme emea tgw-repo` for it.
+The full repository path and repository name are preserved; `.git` is removed from the key and folder name.
+You can still provide custom key words instead:
+
+```bash
+proj-clone git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw
+```
+
+Clone into an existing target directory instead:
+
+```bash
+proj-clone-into ~/projects/work/Acme/EMEA \
+  git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw
+```
+
+Both commands support SSH and HTTPS Git URLs. The repository name is read from the final URL path component, and the target folder must not already exist. For `proj-clone-into`, the target directory must exist first. A key that is already registered is rejected to prevent duplicate mappings.
 
 ---
 
@@ -208,6 +236,10 @@ This restores the config from the last backup (and saves your current, possibly-
 | `git pull` fails | Warning listing likely causes (network, auth, merge conflict) |
 | Git not installed | Warning, skips sync gracefully |
 | `proj-add` given a path that doesn't exist yet | Warns immediately, still saves the mapping |
+| `proj-clone` target folder already exists | Stops before cloning and reports the existing folder |
+| `proj-clone-into` target directory doesn't exist | Stops and asks you to create the directory first |
+| `proj-clone`/`proj-clone-into` key already exists | Stops and asks you to choose another key or remove the existing mapping |
+| Git clone fails | Stops, reports the URL/auth/network error, and does not register the mapping |
 | `proj -` with no prior navigation | Tells you there's no previous project |
 | `proj-restore` with no backup file | Tells you no backup exists yet |
 

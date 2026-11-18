@@ -81,6 +81,8 @@ proj-sync-all
 proj-scan ~/projects
 proj-doctor
 proj-add acme emea tgw ~/projects/acme/emea/tgw
+proj-clone git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw
+proj-clone-into ~/projects/acme/emea git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw
 ```
 
 Full command and configuration details: [`Git-Project-Navigation/README.md`](Git-Project-Navigation/README.md)

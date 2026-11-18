@@ -508,6 +508,155 @@ _proj_complete() {
   next_tokens=(${(u)next_tokens})
   _describe 'project' next_tokens
 }
+
+# Extract repo name from a git URL (ssh or https).
+_proj_repo_name_from_url() {
+  local url="$1"
+  local name
+  url="${url%/}"
+  url="${url%%\?*}"
+  url="${url%%\#*}"
+  name="${url:t}"                     # last path segment
+  name="${name%.git}"                 # strip .git suffix
+  echo "$name"
+}
+
+# Derive a navigation key from the URL path.
+# Example: git@gitlab.com:acme/emea/tgw-repo.git -> acme emea tgw-repo
+_proj_default_key_from_url() {
+  local url="$1"
+  local path key
+  url="${url%/}"
+  url="${url%%\?*}"
+  url="${url%%\#*}"
+
+  if [[ "$url" == *://* ]]; then
+    path="${url#*://}"
+    path="${path#*/}"
+  elif [[ "$url" == *:*/* ]]; then
+    path="${url#*:}"
+  else
+    path="${url}"
+  fi
+
+  path="${path%.git}"
+  key="${(L)${path//\// }}"
+  echo "$key"
+}
+
+# Clone a repo into the CURRENT directory and register it.
+# Usage: proj-clone <url> [key words...]
+# Example: proj-clone git@gitlab.com:acme/emea/tgw-repo.git
+# Override example: proj-clone git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw
+proj-clone() {
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: proj-clone <url> [key words...]"
+    echo "Example: proj-clone git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw"
+    return 1
+  fi
+
+  local url="$1"
+  shift
+  local key
+  if [[ $# -gt 0 ]]; then
+    key="${(L)*}"
+  else
+    key="$(_proj_default_key_from_url "$url")"
+  fi
+
+  if [[ -n "${PROJECT_DIRS[$key]}" ]]; then
+    echo "Error: key '$key' is already registered -> ${PROJECT_DIRS[$key]}"
+    echo "Choose different key words or remove it first with: proj-remove $key"
+    return 1
+  fi
+
+  local repo_name
+  repo_name="$(_proj_repo_name_from_url "$url")"
+
+  if [[ -z "$repo_name" ]]; then
+    echo "Error: could not determine repo name from URL: $url"
+    return 1
+  fi
+
+  local target="$PWD/$repo_name"
+  if [[ -d "$target" ]]; then
+    echo "Error: folder already exists: $target"
+    echo "Clone into a different location or remove the existing folder first."
+    return 1
+  fi
+
+  echo "Cloning $url into $target ..."
+  if ! git clone "$url" "$target" 2>&1; then
+    echo "Error: git clone failed. Check the URL, your SSH key/auth, or network access."
+    return 1
+  fi
+
+  echo "${key}|${target}" >> "$PROJECT_DIRS_CONF"
+  _proj_load_map
+  echo "Added: '$key' -> $target"
+  echo "Run 'proj $key' anytime to jump in and sync."
+}
+
+# Clone a repo into a SPECIFIC folder and register it.
+# Usage: proj-clone-into <target-folder> <url> [key words...]
+# Example: proj-clone-into ~/projects/work/Acme/EMEA git@gitlab.com:acme/emea/tgw-repo.git
+proj-clone-into() {
+  if [[ $# -lt 2 ]]; then
+    echo "Usage: proj-clone-into <target-folder> <url> [key words...]"
+    echo "Example: proj-clone-into ~/projects/work/Acme/EMEA git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw"
+    return 1
+  fi
+
+  local target_dir="${1/#\~/$HOME}"
+  target_dir="${target_dir:A}"
+  local url="$2"
+  shift 2
+  local key
+  if [[ $# -gt 0 ]]; then
+    key="${(L)*}"
+  else
+    key="$(_proj_default_key_from_url "$url")"
+  fi
+
+  if [[ -n "${PROJECT_DIRS[$key]}" ]]; then
+    echo "Error: key '$key' is already registered -> ${PROJECT_DIRS[$key]}"
+    echo "Choose different key words or remove it first with: proj-remove $key"
+    return 1
+  fi
+
+  if [[ ! -d "$target_dir" ]]; then
+    echo "Error: target folder does not exist: $target_dir"
+    echo "Create it first: mkdir -p $target_dir"
+    return 1
+  fi
+
+  local repo_name
+  repo_name="$(_proj_repo_name_from_url "$url")"
+
+  if [[ -z "$repo_name" ]]; then
+    echo "Error: could not determine repo name from URL: $url"
+    return 1
+  fi
+
+  local target="$target_dir/$repo_name"
+  if [[ -d "$target" ]]; then
+    echo "Error: folder already exists: $target"
+    echo "Clone into a different location or remove the existing folder first."
+    return 1
+  fi
+
+  echo "Cloning $url into $target ..."
+  if ! git clone "$url" "$target" 2>&1; then
+    echo "Error: git clone failed. Check the URL, your SSH key/auth, or network access."
+    return 1
+  fi
+
+  echo "${key}|${target}" >> "$PROJECT_DIRS_CONF"
+  _proj_load_map
+  echo "Added: '$key' -> $target"
+  echo "Run 'proj $key' anytime to jump in and sync."
+}
+
 compdef _proj_complete proj
 compdef _proj_complete proj-remove
 PROJNAV_EOF
