@@ -1,152 +1,139 @@
 # 🚀 Developer Environment Setup Toolkit
 
-> One toolkit to build, configure, and manage your Linux dev shell — from a fresh install to a fully personalized Zsh + Powerlevel10k setup. 🐧✨
+> A Linux workstation toolkit for setting up Zsh, navigating projects, and managing separate Git identities. 🐧✨
 
-This collection turns a fresh Linux machine into a polished developer workstation with just a few commands. It bundles an automated installer, configuration files, and interactive tools for daily development. 🛠️
+This repository turns a fresh Linux, WSL, or distro environment into a personalized developer workspace. It includes an automated Zsh installer plus interactive tools for project navigation and GitLab profile management. 🛠️
 
 ---
 
-## 📁 What's Inside
+## 📁 Repository Structure
 
-| File | Type | Purpose |
+| Folder | Contents | Purpose |
 | --- | --- | --- |
-| `initial-setup.sh` | ⚙️ Installer | Installs packages, config files, fonts, and shell defaults |
-| `.zshrc` | 🧬 Configuration | Main Zsh setup with plugins, aliases, and prompt loading |
-| `.p10k.zsh` | 🎨 Theme | Powerlevel10k prompt styling, icons, and git indicators |
-| `install_project_nav.sh` | 🗂️ Tool installer | Installs the interactive project navigation helper |
-| `git-profile-manager-v2.sh` | 🔑 Interactive tool | Manages Git identities and SSH keys per project |
+| [`Linux-Initial-Setup/`](Linux-Initial-Setup/) | `initial-setup.sh`, `.zshrc`, `.p10k.zsh` | Installs Zsh, common developer packages, fonts, shell configuration, and Powerlevel10k |
+| [`Git-Project-Navigation/`](Git-Project-Navigation/) | `install_project_nav.sh` | Installs fast project-jumping commands and Git repository sync helpers |
+| [`Git-Profile-Manager/`](Git-Profile-Manager/) | `git-profile-manager-v3.sh` | Manages per-project Git identities and SSH keys |
 
 ---
 
-## 1️⃣ ⚙️ `initial-setup.sh` — The All-in-One Installer
+## 1️⃣ ⚙️ Linux Initial Setup
 
 This is the main setup script. It automates the boring parts so you can focus on building instead of managing shell configuration.
+[`initial-setup.sh`](Linux-Initial-Setup/initial-setup.sh) prepares a Zsh + Powerlevel10k development shell.
 
 ### ✅ What it does
 
-- Detects the OS and package manager (Debian/Ubuntu or RHEL/Fedora/CentOS)
-- Installs required packages such as `zsh`, `git`, and `gh` if they are missing
-- Installs Powerlevel10k font support so symbols and emoji render correctly
-- Optionally sets Zsh as the default login shell via `chsh`
-- Copies `.zshrc` and `.p10k.zsh` into `$HOME`, backing up any current versions first
-- Makes the interactive helper scripts executable in the project directory
-- Verifies the final setup and prints a summary
+- Detects Debian/Ubuntu or RHEL/Fedora family distributions
+- Detects `apt`, `dnf`, `microdnf`, or `yum`
+- Installs `zsh`, `git`, `gh`, and supported Powerlevel10k font packages
+- Optionally changes the current user's login shell to Zsh
+- Copies `.zshrc` and `.p10k.zsh` into the target user's home directory
+- Backs up existing `.zshrc` and `.p10k.zsh` with timestamped `.bak.YYYYMMDD_HHMMSS` files
+- Creates `~/.local/bin/env` for compatibility with the included Zsh configuration
+- Verifies installed commands and configuration files
 
-### 🎯 Usage
+### 🚀 Usage
+
+Run from inside `Linux-Initial-Setup/`:
 
 ```bash
-sudo ./initial-setup.sh                 # Full install
-sudo ./initial-setup.sh --dry-run       # Preview actions without changing anything
-sudo ./initial-setup.sh --config-dir /path/to/files
-sudo ./initial-setup.sh --no-default-shell
-sudo ./initial-setup.sh --skip-packages
+./initial-setup.sh --dry-run
+./initial-setup.sh
+./initial-setup.sh --no-default-shell
+./initial-setup.sh --skip-packages
+./initial-setup.sh --config-dir /path/to/configs
 ```
 
-> Tip: Run `--dry-run` first to preview exactly what will happen before applying changes.
+The script invokes `sudo` internally when needed. It can run as a normal user, and when called through `sudo`, it resolves the target account from `SUDO_USER`.
+
+Full details: [`Linux-Initial-Setup/README.md`](Linux-Initial-Setup/README.md)
 
 ---
 
-## 2️⃣ 🧬 `.zshrc` — Main Zsh Configuration
+## 2️⃣ 🧬 Zsh and Powerlevel10k Configuration
 
-This is the master configuration file for the shell. It loads the theme, plugin manager, aliases, and project navigation helper.
+The Linux setup folder contains:
 
-### ✅ What it does
+- [`.zshrc`](Linux-Initial-Setup/.zshrc) — Zinit plugin loading, shell history, completion, useful aliases, SSH-agent reuse, and private secrets support
+- [`.p10k.zsh`](Linux-Initial-Setup/.p10k.zsh) — colorful Rainbow-style Powerlevel10k prompt settings
 
-- Loads Powerlevel10k's instant prompt cache for faster startup
-- Configures Zinit and loads essential plugins such as autosuggestions and syntax highlighting
-- Sources `project_nav.zsh` for project jumping and navigation shortcuts
-- Sets commonly used shell history and completion behavior
-- Defines developer aliases and environment hooks
-- Keeps the setup ready for a personalized workstation experience
-
-> This file expects Powerlevel10k to be available in the configured Zsh theme location.
+On first Zsh startup, Zinit is cloned automatically and Powerlevel10k plus the configured plugins are loaded.
 
 ---
 
-## 3️⃣ 🎨 `.p10k.zsh` — Powerlevel10k Theme Configuration
+## 3️⃣ 🗂️ Project Navigation
 
-This file controls the visual style of the prompt, including colors, icons, and status indicators.
-
-### ✅ What it does
-
-- Uses a colorful Powerlevel10k rainbow-style prompt
-- Shows the current directory and git status in the left prompt
-- Displays exit codes, command duration, jobs, and environment indicators in the right prompt
-- Adds custom directory icons for work, personal, infra, config, and SSH paths
-- Includes a custom git formatter for ahead/behind status, stash state, and staged/unstaged changes
-- Keeps the prompt readable and informative while working across repos and environments
-
----
-
-## 4️⃣ 🗂️ `install_project_nav.sh` — Project Navigation Installer
-
-This installer writes the project navigation helper to your Zsh config directory and sets up quick project switching.
-
-### ✅ What it does
-
-- Writes `~/.config/zsh/project_nav.zsh`
-- Backs up any existing broken or outdated configuration before replacing it
-- Creates a project mapping file for quick navigation between repos
-- Enables project commands such as `proj`, `proj-sync-all`, `proj-scan`, and `proj-doctor`
-
-### Example commands
+This script writes the project navigation helper to your Zsh config directory and sets up quick project switching.
+[`install_project_nav.sh`](Git-Project-Navigation/install_project_nav.sh) installs `~/.config/zsh/project_nav.zsh`.
 
 ```bash
-proj acme emea tgw     # Jump to a project by name
-proj                   # List all registered projects
-proj -                 # Jump back to the previous project
-proj-sync-all          # Pull latest changes in every registered repo
-proj-scan <folder>     # Auto-discover repos under a folder
-proj-doctor            # Check for missing or broken project mappings
+cd Git-Project-Navigation
+./install_project_nav.sh
+exec zsh
 ```
 
----
-
-## 5️⃣ 🔑 `git-profile-manager-v2.sh` — Git Profile Manager
-
-This helper lets you manage multiple Git identities and SSH keys across projects. It is especially useful for teams that need different names and emails per repository.
-
-### ✅ What it does
-
-- Manages per-project Git identities using `includeIf` config entries
-- Keeps global Git settings separate from project-specific overrides
-- Generates and assigns SSH keys for GitLab use
-- Warns when a key is reused across multiple profiles
-- Creates full snapshot backups before making changes
-- Verifies SSH authentication after applying a profile
-
-### Run it
+It adds commands such as:
 
 ```bash
-./git-profile-manager-v2.sh
+proj acme emea tgw
+proj -
+proj-sync-all
+proj-scan ~/projects
+proj-doctor
+proj-add acme emea tgw ~/projects/acme/emea/tgw
 ```
 
+Full command and configuration details: [`Git-Project-Navigation/README.md`](Git-Project-Navigation/README.md)
+
 ---
 
-## 🚦 Quick Start
+## 4️⃣ 🔑 Git Profile Manager
+
+[`git-profile-manager-v3.sh`](Git-Profile-Manager/git-profile-manager-v3.sh) lets you maintain separate Git identities and SSH keys.
 
 ```bash
-# 1) Preview the installer
-sudo ./initial-setup.sh --dry-run
+cd Git-Profile-Manager
+chmod +x git-profile-manager-v3.sh
+./git-profile-manager-v3.sh
+```
 
-# 2) Install the environment
-sudo ./initial-setup.sh
+It can add or edit profiles, generate Ed25519 SSH keys, configure Git `includeIf` routing, create configuration snapshots, restore backups, and test SSH authentication.
 
-# 3) Load your new shell configuration
+Full usage: [`Git-Profile-Manager/Readme.md`](Git-Profile-Manager/Readme.md)
+
+---
+
+## 🚦 Recommended Setup
+
+```bash
+# 1. Preview the Linux setup
+cd Linux-Initial-Setup
+./initial-setup.sh --dry-run
+
+# 2. Apply the Linux and Zsh setup
+./initial-setup.sh
+
+# 3. Install project navigation
+cd ../Git-Project-Navigation
+./install_project_nav.sh
+
+# 4. Start Zsh
 exec zsh
 
-# 4) Configure the helper tools
-./install_project_nav.sh
-./git-profile-manager-v2.sh
+# 5. Optionally configure separate Git identities
+cd ../Git-Profile-Manager
+./git-profile-manager-v3.sh
 ```
 
 ---
 
 ## 💡 Notes and Tips
 
-- Re-running the setup script is safe and idempotent
-- Powerlevel10k needs the correct font packages for proper icon rendering
-- After setup, your current shell may still be bash until you run `exec zsh`
-- You can tweak the theme by editing `.p10k.zsh` and re-running `p10k configure`
+- Re-running scripts that support it is generally safe; installers create backups before replacing configuration.
+- Run `--dry-run` before the Linux setup to inspect actions without changing the machine.
+- Powerlevel10k icons require a compatible Nerd or Powerline font and an emoji font.
+- Zsh loads private settings from `~/.zsh_secrets` if that file exists; do not commit secrets to this repository.
+- Use `p10k configure` to personalize the prompt after setup.
+- Open a new terminal or run `exec zsh` after changing shell configuration.
 
-Built for developers who want a beautiful, powerful shell without the manual grunt work. Happy hacking! 💻🚀
+Built for developers who want a beautiful, powerful shell without the manual grunt work. 💻🚀
