@@ -1,8 +1,8 @@
 # 🚀 Project Navigator for zsh
 
-A lightweight, powerful zsh function suite that lets you jump into any GitLab repo (organized by **client → region → project**) with a short, case-insensitive command like `proj acme emea tgw`, automatically checks out `main`/`master`, and runs `git pull`. Includes context-awareness, back-jump history, bulk sync, auto-discovery, config backups, and built-in error handling.
+A lightweight zsh function suite for navigating Git repositories with short, case-insensitive commands such as `proj acme emea tgw`. It supports context-aware navigation, Git sync, back-jump history, bulk sync, repository discovery, and clone-and-register with shortcuts derived from repository URLs.
 
-Built for **WSL2 + zsh + Powerlevel10k** setups.
+The installer supports Linux and WSL environments with zsh.
 
 ---
 
@@ -21,6 +21,7 @@ Built for **WSL2 + zsh + Powerlevel10k** setups.
 | ➕ Add a project | `proj-add <keys> <path>` | Register a new mapping manually |
 | 📥 Clone into current folder | `proj-clone <url> [keys]` | Clone a repository under the current folder and register it |
 | 📂 Clone into a specific folder | `proj-clone-into <folder> <url> [keys]` | Clone a repository under a chosen folder and register it |
+| 🔑 Preview URL shortcut | `proj-url-key <url>` | Show the shortcut that would be derived from a Git URL |
 | ➖ Remove a project | `proj-remove <keys>` | Delete a mapping (auto-backs up config first) |
 | ✏️ Edit config | `proj-edit` | Open the raw config file for manual bulk edits (auto-backs up first) |
 | ♻️ Restore config | `proj-restore` | Restore the config from its last automatic backup |
@@ -32,37 +33,22 @@ Built for **WSL2 + zsh + Powerlevel10k** setups.
 
 ## 🛠️ Installation
 
-### 1. Create the config folder
+### 1. Run the installer
 
 ```bash
-mkdir -p ~/.config/zsh
+cd Git-Project-Navigation
+bash install_project_nav_v2.sh
 ```
 
-### 2. Save the script
+The installer writes `~/.config/zsh/project_nav_v2.zsh`, backs up an existing copy with a timestamped `.bak.<timestamp>` suffix, and adds a source line to `~/.zshrc` if it is not already present. If zsh is installed, it checks the generated script's syntax. It also warns if it finds an older `project_nav` script sourced from `.zshrc`; comment out that older source line to avoid loading both versions.
 
-Save `project_nav.zsh` into:
-
-```
-~/.config/zsh/project_nav.zsh
-```
-
-(Use the provided `install_project_nav.sh` script if you want to avoid copy-paste corruption issues — it writes the file cleanly via a bash heredoc.)
-
-### 3. Source it from `.zshrc`
-
-Add this line to `~/.zshrc` (keep it after the p10k instant-prompt block, and before `source ~/.p10k.zsh` at the very bottom):
-
-```bash
-source ~/.config/zsh/project_nav.zsh
-```
-
-### 4. Reload your shell
+### 2. Reload your shell
 
 ```bash
 exec zsh
 ```
 
-You now have all the commands listed in the table above available.
+You now have all the commands listed above available.
 
 ---
 
@@ -104,29 +90,37 @@ A backup is automatically taken before the editor opens.
 
 ### Option D — Clone and register
 
-Clone a repository into the current directory:
+Clone a repository into the current directory. By default, the shortcut is derived from the URL:
 
 ```bash
-cd ~/projects/work/Acme/EMEA
-proj-clone git@gitlab.com:acme/emea/tgw-repo.git
+cd ~/projects/work
+proj-clone git@gitlab.com:group-org/platform/services/region/sample-repo.git
 ```
 
-This creates `~/projects/work/Acme/EMEA/tgw-repo` and automatically registers `acme emea tgw-repo` for it.
-The full repository path and repository name are preserved; `.git` is removed from the key and folder name.
-You can still provide custom key words instead:
+For this URL the command derives the shortcut `proj group region sample-repo`: it uses the first path segment as the client (stripping a trailing `-org`, `-group`, or `-grp`), the repository's parent path segment, and the repository name. With a one-segment URL it uses the repo name; with two segments it uses the first and last segments. The cloned folder uses the URL's repository name, without a trailing `.git`.
+
+Preview the derived shortcut without cloning:
 
 ```bash
-proj-clone git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw
+proj-url-key git@gitlab.com:group-org/platform/services/region/sample-repo.git
+# proj group region sample-repo
 ```
 
-Clone into an existing target directory instead:
+Provide custom key words when cloning if you prefer:
+
+```bash
+proj-clone git@gitlab.com:group-org/platform/services/region/sample-repo.git acme emea tgw
+```
+
+To clone under a specific existing folder instead of the current directory:
 
 ```bash
 proj-clone-into ~/projects/work/Acme/EMEA \
-  git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw
+  git@gitlab.com:group-org/platform/services/region/sample-repo.git \
+  acme emea tgw
 ```
 
-Both commands support SSH and HTTPS Git URLs. The repository name is read from the final URL path component, and the target folder must not already exist. For `proj-clone-into`, the target directory must exist first. A key that is already registered is rejected to prevent duplicate mappings.
+Clone commands support SCP-style SSH, `ssh://`, HTTP, and HTTPS Git URLs. The destination repository folder must not already exist; the destination parent passed to `proj-clone-into` must already exist. A shortcut that is already registered is rejected to prevent duplicate mappings. If cloning fails, the mapping is not added.
 
 ---
 
@@ -196,9 +190,9 @@ When `proj <keys>` resolves to an exact repo:
 
 1. 📁 Confirms the folder exists and is readable — if not, prints the exact broken path and fix commands.
 2. 🔍 Checks it's a git repository (if not, just `cd`s there with a note, no sync attempted).
-3. 🌿 Detects the default branch: local `main`, local `master`, remote `origin/main`, remote `origin/master`, in that order.
-4. 🔀 Switches to that branch if needed — if `git checkout` fails (usually uncommitted changes), tells you to commit/stash first.
-5. 📥 Runs `git pull origin <default>`, then compares the commit hash before and after the pull and prints either a `git log --oneline` of new commits, or "No new commits. Already up to date."
+3. 🌿 Detects a default branch from local `main`, local `master`, remote `origin/main`, or remote `origin/master`, in that order.
+4. 🔀 If found, switches to that branch if needed and runs `git pull origin <default>`. If no `main`/`master` is found, it stays on the current branch and runs `git pull` using that branch's upstream configuration.
+5. 📥 Compares the commit hash before and after the pull and prints either a `git log --oneline` of new commits or "No new commits. Already up to date."
 
 ---
 
@@ -267,16 +261,19 @@ Commit or stash your changes first, then re-run `proj <keys>`.
 **A repo path changed**
 `proj-remove <old keys>` then `proj-add <new keys> <new path>`, or edit directly with `proj-edit`.
 
-**Copy-paste corruption when editing the script manually**
-Use the provided `install_project_nav.sh` script instead of pasting into `nano` — it writes the file cleanly via a bash heredoc, avoiding quote/character corruption issues common with WSL terminal paste.
+**The installer reports that zsh is not found**
+The installer still writes the generated file and configures `.zshrc`, but skips its syntax check. Install zsh before starting a zsh session.
+
+**Both old and v2 commands appear to load**
+Comment out old `project_nav` source lines in `~/.zshrc`, keep the v2 source line, and run `exec zsh`.
 
 ---
 
 ## 🗑️ Uninstalling
 
 ```bash
-# remove the "source ~/.config/zsh/project_nav.zsh" line from .zshrc, then:
-rm ~/.config/zsh/project_nav.zsh
+# remove the "source ~/.config/zsh/project_nav_v2.zsh" line from .zshrc, then:
+rm ~/.config/zsh/project_nav_v2.zsh
 rm ~/.config/zsh/project_dirs.conf
 rm ~/.config/zsh/project_dirs.conf.bak
 ```

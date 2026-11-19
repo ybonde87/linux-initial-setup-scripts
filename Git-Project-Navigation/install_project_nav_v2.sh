@@ -1,45 +1,71 @@
 #!/usr/bin/env bash
-# Installer for project_nav.zsh — writes the file cleanly via heredoc
-# to avoid clipboard/editor corruption issues seen with manual paste.
+# install_project_nav_v2.sh
 #
-# Usage:
-#   bash install_project_nav.sh
+# Self-contained installer for the Project Navigator (v2).
+# Run it on any WSL/Linux machine with zsh:
+#
+#   bash install_project_nav_v2.sh
+#
+# It:
+#   1. Backs up an existing project_nav_v2.zsh
+#   2. Writes the zsh script cleanly (no copy/paste corruption)
+#   3. Checks its syntax with zsh, if zsh is available
+#   4. Adds the source line to ~/.zshrc (idempotent)
+#   5. Warns if an older project_nav version is still sourced
+#
+# The zsh script itself is embedded below between PROJNAV_EOF markers.
 
 set -e
-TARGET="$HOME/.config/zsh/project_nav.zsh"
-mkdir -p "$HOME/.config/zsh"
+
+TARGET="$HOME/.config/zsh/project_nav_v2.zsh"
+ZSHRC="$HOME/.zshrc"
+SOURCE_LINE="source $TARGET"
+STAMP="$(date +%s)"
+
+mkdir -p "$(dirname "$TARGET")"
 
 if [[ -f "$TARGET" ]]; then
-  cp "$TARGET" "${TARGET}.broken.$(date +%s)"
-  echo "Existing (possibly broken) file backed up to ${TARGET}.broken.<timestamp>"
+  BACKUP="${TARGET}.bak.${STAMP}"
+  cp "$TARGET" "$BACKUP"
+  echo "Existing file backed up to: $BACKUP"
 fi
 
 cat > "$TARGET" << 'PROJNAV_EOF'
-# ~/.config/zsh/project_nav.zsh
+# ~/.config/zsh/project_nav_v2.zsh
 #
 # Hierarchical, context-aware, case-insensitive project navigation
-# + auto git pull for zsh, with error handling, bulk sync, auto-discovery,
-# back-jump history, post-pull change summaries, and config backups.
+# + auto git pull, bulk sync, auto-discovery, back-jump, backups,
+# and clone-and-register with automatic shortcut derivation from the URL.
 #
-# Core usage:
-#   proj acme emea tgw     -> exact match (any case, works from anywhere)
-#   proj emea tgw          -> context-aware shortcut if already inside acme/
-#   proj acme              -> lists all repos under acme
-#   proj                   -> lists every registered project key
-#   proj -                 -> jump back to the previously visited project
+# Core:
+#   proj group region sample-repo  -> jump, checkout main/master, pull
+#   proj region sample-repo        -> context-aware (when inside group/)
+#   proj -                         -> back to previous project
+#   proj                           -> list all
 #
-# Bulk / maintenance:
-#   proj-sync-all           -> pull latest on every registered repo
-#   proj-scan <base-folder> -> auto-discover & register all git repos under a folder
-#   proj-doctor             -> audit all mappings for missing/broken repos
-#   proj-restore            -> restore project_dirs.conf from its last backup
+# Clone + register:
+#   proj-clone <url>                       -> clone into $PWD, auto shortcut
+#   proj-clone <url> <key words...>        -> clone into $PWD, manual shortcut
+#   proj-clone-into <folder> <url> [keys]  -> clone into <folder>
+#   proj-url-key <url>                     -> preview the auto-derived shortcut
 #
-#   proj-add Acme EMEA TGW ~/projects/work/Acme/EMEA/TGW-repo
-#   proj-remove acme emea tgw
-#   proj-edit / proj-reload
+# Auto shortcut rule for a URL like
+#   git@gitlab.com:group-org/platform/services/region/sample-repo.git
+#   -> first path segment (client, with -org/-group/-grp stripped) = group
+#   -> parent folder of the repo (region)                          = region
+#   -> repo name                                                   = sample-repo
+#   => proj group region sample-repo
+#
+# Maintenance:
+#   proj-sync-all, proj-scan <folder>, proj-doctor, proj-add, proj-remove,
+#   proj-edit, proj-restore, proj-reload, proj-context
 
 PROJECT_DIRS_CONF="${PROJECT_DIRS_CONF:-$HOME/.config/zsh/project_dirs.conf}"
 PROJECT_DIRS_BACKUP="${PROJECT_DIRS_CONF}.bak"
+
+# Suffixes stripped from the first URL segment to get the client name.
+typeset -ga PROJ_CLIENT_SUFFIXES
+PROJ_CLIENT_SUFFIXES=(-org -group -grp)
 
 mkdir -p "$(dirname "$PROJECT_DIRS_CONF")"
 [[ -f "$PROJECT_DIRS_CONF" ]] || touch "$PROJECT_DIRS_CONF"
@@ -48,15 +74,16 @@ typeset -gA PROJECT_DIRS
 typeset -g PROJ_CURR_KEY=""
 typeset -g PROJ_PREV_KEY=""
 
+# NOTE: never name a local variable "path" in zsh - it is tied to $PATH.
 _proj_load_map() {
   PROJECT_DIRS=()
-  local line key path
+  local line key dir
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" == \#* ]] && continue
     key="${line%%|*}"
-    path="${line#*|}"
+    dir="${line#*|}"
     key="${key:l}"
-    PROJECT_DIRS[$key]="$path"
+    PROJECT_DIRS[$key]="$dir"
   done < "$PROJECT_DIRS_CONF"
 }
 
@@ -71,6 +98,16 @@ _proj_update_history() {
   if [[ "$key" != "$PROJ_CURR_KEY" ]]; then
     PROJ_PREV_KEY="$PROJ_CURR_KEY"
     PROJ_CURR_KEY="$key"
+  fi
+}
+
+_proj_print_pull_summary() {
+  local old_rev="$1" new_rev="$2"
+  if [[ -n "$old_rev" && -n "$new_rev" && "$old_rev" != "$new_rev" ]]; then
+    echo "New commits pulled:"
+    git log "$old_rev..$new_rev" --oneline
+  else
+    echo "No new commits. Already up to date."
   fi
 }
 
@@ -132,9 +169,10 @@ _proj_git_sync() {
     default_branch="master"
   fi
 
+  local old_rev new_rev
+
   if [[ -z "$default_branch" ]]; then
     echo "Warning: could not detect a main/master branch. Staying on '$current_branch'."
-    local old_rev new_rev
     old_rev="$(git rev-parse HEAD 2>/dev/null)"
     if ! git pull 2>&1; then
       echo "Error: git pull failed on '$current_branch'. Check network access or upstream config."
@@ -155,7 +193,6 @@ _proj_git_sync() {
   fi
 
   echo "Pulling latest '$default_branch' in $target ..."
-  local old_rev new_rev
   old_rev="$(git rev-parse HEAD 2>/dev/null)"
   if ! git pull origin "$default_branch" 2>&1; then
     echo "Error: git pull failed. Possible causes: no network, auth/SSH key issue, or merge conflict."
@@ -164,16 +201,6 @@ _proj_git_sync() {
   fi
   new_rev="$(git rev-parse HEAD 2>/dev/null)"
   _proj_print_pull_summary "$old_rev" "$new_rev"
-}
-
-_proj_print_pull_summary() {
-  local old_rev="$1" new_rev="$2"
-  if [[ -n "$old_rev" && -n "$new_rev" && "$old_rev" != "$new_rev" ]]; then
-    echo "New commits pulled:"
-    git log "$old_rev..$new_rev" --oneline
-  else
-    echo "No new commits. Already up to date."
-  fi
 }
 
 _proj_detect_context() {
@@ -219,21 +246,21 @@ proj() {
       return 1
     fi
     local target_key="$PROJ_PREV_KEY"
-    local target_path="${PROJECT_DIRS[$target_key]}"
-    if [[ -z "$target_path" ]]; then
+    local target_dir="${PROJECT_DIRS[$target_key]}"
+    if [[ -z "$target_dir" ]]; then
       echo "Previous project '$target_key' is no longer registered."
       return 1
     fi
     echo "Jumping back to '$target_key'..."
-    _proj_git_sync "$target_key" "$target_path"
-    [[ "$PWD" -ef "$target_path" ]] && _proj_update_history "$target_key"
+    _proj_git_sync "$target_key" "$target_dir"
+    [[ "$PWD" -ef "$target_dir" ]] && _proj_update_history "$target_key"
     return
   fi
 
   if [[ $# -eq 0 ]]; then
     echo "Registered projects:"
     for k in "${(@k)PROJECT_DIRS}"; do
-      printf "  %-30s -> %s\n" "$k" "$PROJECT_DIRS[$k]"
+      printf "  %-40s -> %s\n" "$k" "$PROJECT_DIRS[$k]"
     done
     return 0
   fi
@@ -281,13 +308,13 @@ proj() {
     if [[ ${#raw_matches[@]} -gt 0 ]]; then
       echo "Multiple projects under '$raw_key':"
       for m in "${raw_matches[@]}"; do
-        printf "  %-30s -> %s\n" "$m" "$PROJECT_DIRS[$m]"
+        printf "  %-40s -> %s\n" "$m" "$PROJECT_DIRS[$m]"
       done
     fi
     if [[ ${#ctx_matches[@]} -gt 0 ]]; then
       echo "Multiple projects under context '$ctx_key':"
       for m in "${ctx_matches[@]}"; do
-        printf "  %-30s -> %s\n" "$m" "$PROJECT_DIRS[$m]"
+        printf "  %-40s -> %s\n" "$m" "$PROJECT_DIRS[$m]"
       done
     fi
   else
@@ -302,12 +329,12 @@ proj-add() {
     echo "Example: proj-add Acme EMEA TGW ~/projects/work/Acme/EMEA/TGW-repo"
     return 1
   fi
-  local path="${@[-1]}"
+  local dir="${@[-1]}"
   local key="${(L)*:1:-1}"
-  path="${path/#\~/$HOME}"
+  dir="${dir/#\~/$HOME}"
 
-  if [[ ! -d "$path" ]]; then
-    echo "Warning: '$path' does not exist yet. Adding the mapping anyway,"
+  if [[ ! -d "$dir" ]]; then
+    echo "Warning: '$dir' does not exist yet. Adding the mapping anyway,"
     echo "but 'proj $key' will fail until the folder exists."
   fi
 
@@ -318,9 +345,9 @@ proj-add() {
     proj-remove "$key" >/dev/null
   fi
 
-  echo "${key}|${path}" >> "$PROJECT_DIRS_CONF"
+  echo "${key}|${dir}" >> "$PROJECT_DIRS_CONF"
   _proj_load_map
-  echo "Added: '$key' -> $path"
+  echo "Added: '$key' -> $dir"
 }
 
 proj-remove() {
@@ -380,20 +407,20 @@ proj-doctor() {
   fi
 
   local ok=0 missing=0 notgit=0
-  local k path
+  local k dir
 
   echo "Checking ${#PROJECT_DIRS[@]} registered project(s)...\n"
 
   for k in "${(@k)PROJECT_DIRS}"; do
-    path="${PROJECT_DIRS[$k]}"
-    if [[ ! -d "$path" ]]; then
-      printf "  [MISSING]  %-25s -> %s\n" "$k" "$path"
+    dir="${PROJECT_DIRS[$k]}"
+    if [[ ! -d "$dir" ]]; then
+      printf "  [MISSING]  %-40s -> %s\n" "$k" "$dir"
       ((missing++))
-    elif ! git -C "$path" rev-parse --is-inside-work-tree &>/dev/null; then
-      printf "  [NOT GIT]  %-25s -> %s\n" "$k" "$path"
+    elif ! git -C "$dir" rev-parse --is-inside-work-tree &>/dev/null; then
+      printf "  [NOT GIT]  %-40s -> %s\n" "$k" "$dir"
       ((notgit++))
     else
-      printf "  [OK]       %-25s -> %s\n" "$k" "$path"
+      printf "  [OK]       %-40s -> %s\n" "$k" "$dir"
       ((ok++))
     fi
   done
@@ -412,17 +439,17 @@ proj-sync-all() {
 
   local start_dir="$PWD"
   local ok=0 fail=0 skip=0
-  local k path
+  local k dir
 
   echo "Syncing ${#PROJECT_DIRS[@]} registered project(s)...\n"
 
   for k in "${(@k)PROJECT_DIRS}"; do
-    path="${PROJECT_DIRS[$k]}"
+    dir="${PROJECT_DIRS[$k]}"
     echo "== $k =="
-    if _proj_git_sync "$k" "$path"; then
+    if _proj_git_sync "$k" "$dir"; then
       ((ok++))
     else
-      if [[ ! -d "$path" ]]; then
+      if [[ ! -d "$dir" ]]; then
         ((skip++))
       else
         ((fail++))
@@ -453,12 +480,12 @@ proj-scan() {
   echo "Scanning '$base' for git repositories...\n"
 
   local added=0 skipped=0
-  local git_dir repo_path rel key
+  local git_dir repo_dir rel key
 
   while IFS= read -r -d '' git_dir; do
-    repo_path="${git_dir:h}"
-    rel="${repo_path#$base/}"
-    [[ "$rel" == "$repo_path" ]] && rel="${repo_path:t}"
+    repo_dir="${git_dir:h}"
+    rel="${repo_dir#$base/}"
+    [[ "$rel" == "$repo_dir" ]] && rel="${repo_dir:t}"
     key="${(L)${rel//\// }}"
 
     if [[ -n "${PROJECT_DIRS[$key]}" ]]; then
@@ -467,13 +494,175 @@ proj-scan() {
       continue
     fi
 
-    echo "${key}|${repo_path}" >> "$PROJECT_DIRS_CONF"
-    echo "  [ADDED] '$key' -> $repo_path"
+    echo "${key}|${repo_dir}" >> "$PROJECT_DIRS_CONF"
+    echo "  [ADDED] '$key' -> $repo_dir"
     ((added++))
   done < <(find "$base" -type d -name ".git" -print0 2>/dev/null)
 
   _proj_load_map
   echo "\nScan complete: $added added, $skipped skipped (already registered)."
+}
+
+# ---------------------------------------------------------------------------
+# Clone + register
+# ---------------------------------------------------------------------------
+
+# Splits a git URL (scp-style ssh, ssh://, https://, http://) into path
+# segments, returned in the array $reply. Strips trailing ".git" and "/".
+_proj_url_segments() {
+  local url="$1" p
+  url="${url%/}"
+  url="${url%.git}"
+
+  if [[ "$url" == *://* ]]; then
+    p="${url#*://}"
+    p="${p#*/}"
+  elif [[ "$url" == *:* ]]; then
+    p="${url#*:}"
+  else
+    return 1
+  fi
+
+  p="${p#/}"
+  reply=("${(@s:/:)p}")
+  reply=(${reply:#})
+  [[ ${#reply[@]} -gt 0 ]]
+}
+
+# Derives "client parent repo" from a URL, lowercased.
+#   group-org/.../region/sample-repo  ->  group region sample-repo
+#   group/repo                       ->  group repo
+#   repo                             ->  repo
+_proj_key_from_url() {
+  _proj_url_segments "$1" || return 1
+  local -a segs
+  segs=("${reply[@]}")
+  local n=${#segs[@]}
+  local repo="${segs[-1]}"
+
+  if [[ $n -eq 1 ]]; then
+    echo "${repo:l}"
+    return 0
+  fi
+
+  local client="${segs[1]}"
+  local s
+  for s in "${PROJ_CLIENT_SUFFIXES[@]}"; do
+    if [[ "$client" == *"$s" ]]; then
+      client="${client%$s}"
+      break
+    fi
+  done
+
+  if [[ $n -eq 2 ]]; then
+    echo "${client:l} ${repo:l}"
+  else
+    local parent="${segs[-2]}"
+    echo "${client:l} ${parent:l} ${repo:l}"
+  fi
+}
+
+# Preview the shortcut a URL would get.
+proj-url-key() {
+  if [[ $# -ne 1 ]]; then
+    echo "Usage: proj-url-key <git-url>"
+    return 1
+  fi
+  local key
+  key="$(_proj_key_from_url "$1")"
+  if [[ -z "$key" ]]; then
+    echo "Error: could not parse URL: $1"
+    return 1
+  fi
+  echo "proj $key"
+}
+
+# Shared worker: _proj_clone_core <target-dir> <url> [key words...]
+_proj_clone_core() {
+  local target_dir="$1" url="$2"
+  shift 2
+
+  # Tolerate a leading literal "proj" in the key words.
+  [[ "$1" == "proj" ]] && shift
+
+  local key
+  if [[ $# -gt 0 ]]; then
+    key="${(L)*}"
+  else
+    key="$(_proj_key_from_url "$url")"
+  fi
+
+  if [[ -z "$key" ]]; then
+    echo "Error: could not derive a shortcut from URL: $url"
+    echo "Pass one explicitly: proj-clone <url> <key words...>"
+    return 1
+  fi
+
+  if [[ -n "${PROJECT_DIRS[$key]}" ]]; then
+    echo "Error: shortcut '$key' already exists -> ${PROJECT_DIRS[$key]}"
+    echo "Nothing cloned. Use a different shortcut: proj-clone <url> <key words...>"
+    return 1
+  fi
+
+  local repo_name="${url%/}"
+  repo_name="${repo_name%.git}"
+  repo_name="${repo_name:t}"
+  repo_name="${repo_name##*:}"
+
+  if [[ -z "$repo_name" ]]; then
+    echo "Error: could not determine repo name from URL: $url"
+    return 1
+  fi
+
+  local target="$target_dir/$repo_name"
+  if [[ -e "$target" ]]; then
+    echo "Error: already exists: $target"
+    echo "Register it instead: proj-add $key $target"
+    return 1
+  fi
+
+  echo "Cloning $url"
+  echo "     -> $target"
+  if ! git clone "$url" "$target" 2>&1; then
+    echo "Error: git clone failed. Check the URL, your SSH key/auth, or network access."
+    return 1
+  fi
+
+  echo "${key}|${target}" >> "$PROJECT_DIRS_CONF"
+  _proj_load_map
+  echo "Added shortcut: proj $key"
+}
+
+# proj-clone <url> [key words...]  -> clones into the current directory
+proj-clone() {
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: proj-clone <url> [key words...]"
+    echo "  Auto shortcut : proj-clone git@gitlab.com:group-org/platform/services/region/sample-repo.git"
+    echo "  Manual shortcut: proj-clone <url> group region sample-repo"
+    return 1
+  fi
+  local url="$1"
+  shift
+  _proj_clone_core "$PWD" "$url" "$@"
+}
+
+# proj-clone-into <folder> <url> [key words...]
+proj-clone-into() {
+  if [[ $# -lt 2 ]]; then
+    echo "Usage: proj-clone-into <target-folder> <url> [key words...]"
+    return 1
+  fi
+  local target_dir="${1/#\~/$HOME}"
+  target_dir="${target_dir:A}"
+  local url="$2"
+  shift 2
+
+  if [[ ! -d "$target_dir" ]]; then
+    echo "Error: target folder does not exist: $target_dir"
+    echo "Create it first: mkdir -p $target_dir"
+    return 1
+  fi
+  _proj_clone_core "$target_dir" "$url" "$@"
 }
 
 _proj_complete() {
@@ -494,10 +683,6 @@ _proj_complete() {
       remainder="${k#$prefix }"
     elif [[ -n "$context" && "$k" == "$context $prefix "* ]]; then
       remainder="${k#$context $prefix }"
-    elif [[ -n "$context" && "$k" == "$context $prefix" ]]; then
-      continue
-    elif [[ "$k" == "$prefix" ]]; then
-      continue
     else
       continue
     fi
@@ -508,158 +693,73 @@ _proj_complete() {
   next_tokens=(${(u)next_tokens})
   _describe 'project' next_tokens
 }
-
-# Extract repo name from a git URL (ssh or https).
-_proj_repo_name_from_url() {
-  local url="$1"
-  local name
-  url="${url%/}"
-  url="${url%%\?*}"
-  url="${url%%\#*}"
-  name="${url:t}"                     # last path segment
-  name="${name%.git}"                 # strip .git suffix
-  echo "$name"
-}
-
-# Derive a navigation key from the URL path.
-# Example: git@gitlab.com:acme/emea/tgw-repo.git -> acme emea tgw-repo
-_proj_default_key_from_url() {
-  local url="$1"
-  local path key
-  url="${url%/}"
-  url="${url%%\?*}"
-  url="${url%%\#*}"
-
-  if [[ "$url" == *://* ]]; then
-    path="${url#*://}"
-    path="${path#*/}"
-  elif [[ "$url" == *:*/* ]]; then
-    path="${url#*:}"
-  else
-    path="${url}"
-  fi
-
-  path="${path%.git}"
-  key="${(L)${path//\// }}"
-  echo "$key"
-}
-
-# Clone a repo into the CURRENT directory and register it.
-# Usage: proj-clone <url> [key words...]
-# Example: proj-clone git@gitlab.com:acme/emea/tgw-repo.git
-# Override example: proj-clone git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw
-proj-clone() {
-  if [[ $# -lt 1 ]]; then
-    echo "Usage: proj-clone <url> [key words...]"
-    echo "Example: proj-clone git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw"
-    return 1
-  fi
-
-  local url="$1"
-  shift
-  local key
-  if [[ $# -gt 0 ]]; then
-    key="${(L)*}"
-  else
-    key="$(_proj_default_key_from_url "$url")"
-  fi
-
-  if [[ -n "${PROJECT_DIRS[$key]}" ]]; then
-    echo "Error: key '$key' is already registered -> ${PROJECT_DIRS[$key]}"
-    echo "Choose different key words or remove it first with: proj-remove $key"
-    return 1
-  fi
-
-  local repo_name
-  repo_name="$(_proj_repo_name_from_url "$url")"
-
-  if [[ -z "$repo_name" ]]; then
-    echo "Error: could not determine repo name from URL: $url"
-    return 1
-  fi
-
-  local target="$PWD/$repo_name"
-  if [[ -d "$target" ]]; then
-    echo "Error: folder already exists: $target"
-    echo "Clone into a different location or remove the existing folder first."
-    return 1
-  fi
-
-  echo "Cloning $url into $target ..."
-  if ! git clone "$url" "$target" 2>&1; then
-    echo "Error: git clone failed. Check the URL, your SSH key/auth, or network access."
-    return 1
-  fi
-
-  echo "${key}|${target}" >> "$PROJECT_DIRS_CONF"
-  _proj_load_map
-  echo "Added: '$key' -> $target"
-  echo "Run 'proj $key' anytime to jump in and sync."
-}
-
-# Clone a repo into a SPECIFIC folder and register it.
-# Usage: proj-clone-into <target-folder> <url> [key words...]
-# Example: proj-clone-into ~/projects/work/Acme/EMEA git@gitlab.com:acme/emea/tgw-repo.git
-proj-clone-into() {
-  if [[ $# -lt 2 ]]; then
-    echo "Usage: proj-clone-into <target-folder> <url> [key words...]"
-    echo "Example: proj-clone-into ~/projects/work/Acme/EMEA git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw"
-    return 1
-  fi
-
-  local target_dir="${1/#\~/$HOME}"
-  target_dir="${target_dir:A}"
-  local url="$2"
-  shift 2
-  local key
-  if [[ $# -gt 0 ]]; then
-    key="${(L)*}"
-  else
-    key="$(_proj_default_key_from_url "$url")"
-  fi
-
-  if [[ -n "${PROJECT_DIRS[$key]}" ]]; then
-    echo "Error: key '$key' is already registered -> ${PROJECT_DIRS[$key]}"
-    echo "Choose different key words or remove it first with: proj-remove $key"
-    return 1
-  fi
-
-  if [[ ! -d "$target_dir" ]]; then
-    echo "Error: target folder does not exist: $target_dir"
-    echo "Create it first: mkdir -p $target_dir"
-    return 1
-  fi
-
-  local repo_name
-  repo_name="$(_proj_repo_name_from_url "$url")"
-
-  if [[ -z "$repo_name" ]]; then
-    echo "Error: could not determine repo name from URL: $url"
-    return 1
-  fi
-
-  local target="$target_dir/$repo_name"
-  if [[ -d "$target" ]]; then
-    echo "Error: folder already exists: $target"
-    echo "Clone into a different location or remove the existing folder first."
-    return 1
-  fi
-
-  echo "Cloning $url into $target ..."
-  if ! git clone "$url" "$target" 2>&1; then
-    echo "Error: git clone failed. Check the URL, your SSH key/auth, or network access."
-    return 1
-  fi
-
-  echo "${key}|${target}" >> "$PROJECT_DIRS_CONF"
-  _proj_load_map
-  echo "Added: '$key' -> $target"
-  echo "Run 'proj $key' anytime to jump in and sync."
-}
-
 compdef _proj_complete proj
 compdef _proj_complete proj-remove
 PROJNAV_EOF
 
-echo "Installed clean project_nav.zsh to $TARGET"
+# Remove Windows CRLF line endings, just in case.
+sed -i 's/\r$//' "$TARGET"
+
+# Syntax check with zsh, if available.
+if command -v zsh >/dev/null 2>&1; then
+  if zsh -n "$TARGET"; then
+    echo "Syntax check: OK"
+  else
+    echo "Syntax check: FAILED - do not source this file until fixed."
+    exit 1
+  fi
+else
+  echo "zsh not found in PATH; skipped syntax check."
+fi
+
+touch "$ZSHRC"
+
+# Add the source line only if it is not already present.
+if grep -qF "$SOURCE_LINE" "$ZSHRC"; then
+  echo ".zshrc already sources: $SOURCE_LINE"
+else
+  printf '\n# Project navigator (v2)\n%s\n' "$SOURCE_LINE" >> "$ZSHRC"
+  echo "Added to .zshrc: $SOURCE_LINE"
+fi
+
+# Warn about older project_nav versions that would be sourced too.
+if grep -nE '^[[:space:]]*source[[:space:]]+.*project_nav(\.zsh|_final_v1\.zsh)' "$ZSHRC"; then
+  echo "WARNING: the line(s) above load an older version."
+  echo "Comment them out in $ZSHRC so only project_nav_v2.zsh is loaded."
+fi
+
+echo "Installed: $TARGET"
 echo "Now run: exec zsh"
+echo "Then test: proj-url-key git@gitlab.com:group-org/platform/services/region/sample-repo.git"
+
+touch "$ZSHRC"
+
+# Replace the old conditional project_nav source line, if present.
+OLD_SOURCE='[[ -f ~/.config/zsh/project_nav.zsh ]] && source ~/.config/zsh/project_nav.zsh'
+OLD_SOURCE_ESCAPED='source ~/.config/zsh/project_nav.zsh'
+
+if grep -qF "$OLD_SOURCE" "$ZSHRC"; then
+  cp "$ZSHRC" "${ZSHRC}.bak.${STAMP}"
+  sed -i "s|${OLD_SOURCE}|${SOURCE_LINE}|" "$ZSHRC"
+  echo "Replaced old project_nav source line in $ZSHRC"
+  echo "Backup saved to: ${ZSHRC}.bak.${STAMP}"
+elif grep -qF "$OLD_SOURCE_ESCAPED" "$ZSHRC"; then
+  cp "$ZSHRC" "${ZSHRC}.bak.${STAMP}"
+  sed -i "s|${OLD_SOURCE_ESCAPED}|${SOURCE_LINE}|" "$ZSHRC"
+  echo "Replaced old project_nav source line in $ZSHRC"
+  echo "Backup saved to: ${ZSHRC}.bak.${STAMP}"
+fi
+
+# Add the v2 source line only if it is not already present.
+if grep -qF "$SOURCE_LINE" "$ZSHRC"; then
+  echo ".zshrc already sources: $SOURCE_LINE"
+else
+  printf '\n# Project navigator (v2)\n%s\n' "$SOURCE_LINE" >> "$ZSHRC"
+  echo "Added to .zshrc: $SOURCE_LINE"
+fi
+
+# Warn if any other old project_nav version is still sourced.
+if grep -nE '^[[:space:]]*(\[\[ -f .*project_nav(\.zsh|_final_v1\.zsh).*\]\][[:space:]]*&&[[:space:]]*)?source[[:space:]]+.*project_nav(\.zsh|_final_v1\.zsh)' "$ZSHRC"; then
+  echo "WARNING: the line(s) above load an older project_nav version."
+  echo "Comment them out in $ZSHRC so only project_nav_v2.zsh is loaded."
+fi

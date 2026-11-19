@@ -11,7 +11,7 @@ This repository turns a fresh Linux, WSL, or distro environment into a personali
 | Folder | Contents | Purpose |
 | --- | --- | --- |
 | [`Linux-Initial-Setup/`](Linux-Initial-Setup/) | `initial-setup.sh`, `.zshrc`, `.p10k.zsh` | Installs Zsh, common developer packages, fonts, shell configuration, and Powerlevel10k |
-| [`Git-Project-Navigation/`](Git-Project-Navigation/) | `install_project_nav.sh` | Installs fast project-jumping commands and Git repository sync helpers |
+| [`Git-Project-Navigation/`](Git-Project-Navigation/) | `install_project_nav_v2.sh` | Installs fast project-jumping commands and Git repository sync helpers |
 | [`Git-Profile-Manager/`](Git-Profile-Manager/) | `git-profile-manager-v3.sh` | Manages per-project Git identities and SSH keys |
 
 ---
@@ -64,11 +64,11 @@ On first Zsh startup, Zinit is cloned automatically and Powerlevel10k plus the c
 ## 3️⃣ 🗂️ Project Navigation
 
 This script writes the project navigation helper to your Zsh config directory and sets up quick project switching.
-[`install_project_nav.sh`](Git-Project-Navigation/install_project_nav.sh) installs `~/.config/zsh/project_nav.zsh`.
+[`install_project_nav_v2.sh`](Git-Project-Navigation/install_project_nav_v2.sh) installs `~/.config/zsh/project_nav_v2.zsh`, checks its syntax when zsh is available, and adds it to `~/.zshrc`.
 
 ```bash
 cd Git-Project-Navigation
-./install_project_nav.sh
+bash install_project_nav_v2.sh
 exec zsh
 ```
 
@@ -81,7 +81,8 @@ proj-sync-all
 proj-scan ~/projects
 proj-doctor
 proj-add acme emea tgw ~/projects/acme/emea/tgw
-proj-clone git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw
+proj-clone git@gitlab.com:group-org/platform/services/region/sample-repo.git
+proj-url-key git@gitlab.com:group-org/platform/services/region/sample-repo.git
 proj-clone-into ~/projects/acme/emea git@gitlab.com:acme/emea/tgw-repo.git acme emea tgw
 ```
 
@@ -117,7 +118,7 @@ cd Linux-Initial-Setup
 
 # 3. Install project navigation
 cd ../Git-Project-Navigation
-./install_project_nav.sh
+bash install_project_nav_v2.sh
 
 # 4. Start Zsh
 exec zsh
